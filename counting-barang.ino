@@ -1,11 +1,15 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <ArduinoJson.h>
+#include <esp_wifi.h>
+
 
 // Konfigurasi MAC dan IP static
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-// IPAddress ip(192, 168, 1, 176); // Ganti sesuai jaringanmu
-// IPAddress myDns(192, 168, 1, 1);
+IPAddress ip(10, 46, 145, 169);
+IPAddress gateway(10, 46, 145, 1);
+IPAddress subnet(255, 0, 0, 0);
+IPAddress dns(10, 46, 145, 1);  // Opsional, untuk akses internet
 
 // Pin photosensor
 const int sensorPin = 17;
@@ -16,11 +20,22 @@ volatile unsigned long itemCount = 0;
 
 // Server
 EthernetServer server(80);
-IPAddress ip;
 
 void resetCounter() {
   itemCount = 0;
   Serial.println("Counter reset to 0");
+}
+
+void readMacAddress(){
+  uint8_t baseMac[6];
+  esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, baseMac);
+  if (ret == ESP_OK) {
+    Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
+                  baseMac[0], baseMac[1], baseMac[2],
+                  baseMac[3], baseMac[4], baseMac[5]);
+  } else {
+    Serial.println("Failed to read MAC address");
+  }
 }
 
 void setup() {
@@ -31,11 +46,11 @@ void setup() {
   Ethernet.init(5); // Pin CS W5500 ke GPIO 5
   Ethernet.begin(mac);
   delay(1000);
+  readMacAddress();
 
-  ip = Ethernet.localIP();
 
   Serial.print("Server is at ");
-  Serial.println(ip);
+  Serial.println(Ethernet.localIP());
 
   server.begin();
 }
@@ -88,7 +103,7 @@ void checkSensor() {
 void sendJsonResponse(EthernetClient& client) {
   JsonDocument doc;
   doc["count"] = itemCount;
-  doc["ip"] = ip;
+  doc["ip"] = Ethernet.localIP().toString();
 
   String jsonOutput;
   serializeJson(doc, jsonOutput);
