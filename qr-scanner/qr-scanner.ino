@@ -1,6 +1,6 @@
 #include <SPI.h>
 #include <Ethernet.h>
-#include <WiFi.h>
+// #include <WiFi.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <HardwareSerial.h>
@@ -13,28 +13,38 @@ String trimmedBarcode = "";
 
 Preferences preferences;
 
-byte mac[] = { 0x32, 0xAE, 0xA4, 0x07, 0x0D, 0x66 };
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
-IPAddress staticIP(10, 26, 102, 197);
-IPAddress gateway(10, 26, 102, 190);
+IPAddress staticIP(10, 26, 101, 197);
+IPAddress gateway(10, 26, 101, 190);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(8, 8, 8, 8);
 
 EthernetServer server(80);
 
-bool isAPMode = false;
-
 // ================== Load Configuration ===================
-void loadStaticNetwork() {
+bool loadStaticNetwork() {
   preferences.begin("network", true);
+  bool hasIP = preferences.getBool("hasIP", false);
+  if (!hasIP) {
+    preferences.end();
+    Serial.println("No saved IP config. Using default static IP.");
+    return false;
+  }
+
   byte ip[4], gw[4], sn[4];
   preferences.getBytes("ip", ip, 4);
   preferences.getBytes("gateway", gw, 4);
   preferences.getBytes("subnet", sn, 4);
+
   staticIP = IPAddress(ip[0], ip[1], ip[2], ip[3]);
   gateway = IPAddress(gw[0], gw[1], gw[2], gw[3]);
   subnet = IPAddress(sn[0], sn[1], sn[2], sn[3]);
+
   preferences.end();
+  Serial.print("Loaded IP from preferences: ");
+  Serial.println(staticIP);
+  return true;
 }
 
 void saveStaticNetwork(IPAddress newIP, IPAddress newGateway, IPAddress newSubnet) {
@@ -45,48 +55,9 @@ void saveStaticNetwork(IPAddress newIP, IPAddress newGateway, IPAddress newSubne
   preferences.putBytes("ip", ip, 4);
   preferences.putBytes("gateway", gateway, 4);
   preferences.putBytes("subnet", subnet, 4);
-  // preferences.putBool("hasIP", true);
+  preferences.putBool("hasIP", true);  // Simpan flag
   preferences.end();
-}
-
-void loadWiFi() {
-  preferences.begin("wifi", true);
-  String ssid = preferences.getString("ssid", "");
-  String pass = preferences.getString("pass", "");
-  preferences.end();
-
-  if (ssid.length() > 0) {
-    Serial.print("Connecting to WiFi: ");
-    Serial.println(ssid);
-
-    // Set IP static sebelum WiFi.begin()
-    if (!WiFi.config(staticIP, gateway, subnet, dns)) {
-      Serial.println("STA Failed to configure");
-    }
-
-    WiFi.begin(ssid.c_str(), pass.c_str());
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-      delay(500);
-      Serial.print(".");
-    }
-    Serial.println();
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.print("WiFi Connected: ");
-      Serial.println(WiFi.localIP());
-    } else {
-      Serial.println("WiFi failed. Starting AP mode...");
-      startAPMode();
-    }
-  } else {
-    startAPMode();
-  }
-}
-
-void startAPMode() {
-  WiFi.softAP("ESP32-Setup", "12345678");
-  isAPMode = true;
-  Serial.println("Access Point started. IP: 192.168.4.1");
+  Serial.println("Success Change Network");
 }
 
 // ================== Barcode Reader ===================
@@ -118,9 +89,9 @@ void handleClient(EthernetClient& client, const String& req) {
     sendJsonResponse(client);
   } else if (req.indexOf("GET /config") >= 0) {
     sendConfigPage(client);
-  } else if (req.indexOf("GET /wifi") >= 0) {
-    sendWiFiConfigPage(client);
-  } else if (req.indexOf("POST /setip") >= 0) {
+  } 
+
+    else if (req.indexOf("POST /setip") >= 0) {
     String body = "";
     while (client.available()) body += (char)client.read();
     int ipIndex = body.indexOf("ip=");
@@ -143,27 +114,8 @@ void handleClient(EthernetClient& client, const String& req) {
       }
     }
     client.println("HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\nInvalid IP");
-  } else if (req.indexOf("POST /setwifi") >= 0) {
-    String body = "";
-    while (client.available()) body += (char)client.read();
-
-    String ssid = "", pass = "";
-    int ssidIndex = body.indexOf("ssid=");
-    int passIndex = body.indexOf("pass=");
-    if (ssidIndex >= 0 && passIndex >= 0) {
-      ssid = body.substring(ssidIndex + 5, body.indexOf("&", ssidIndex));
-      pass = body.substring(passIndex + 5);
-      ssid.replace("+", " ");
-      pass.replace("+", " ");
-      preferences.begin("wifi", false);
-      preferences.putString("ssid", ssid);
-      preferences.putString("pass", pass);
-      preferences.end();
-      client.println("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nWiFi saved. Restart ESP.");
-      return;
-    }
-    client.println("HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\nInvalid WiFi data");
-  } else {
+  } 
+  else {
     sendHomePage(client);
   }
 }
@@ -172,7 +124,7 @@ void sendJsonResponse(EthernetClient& client) {
   JsonDocument doc;
   doc["kode_barang"] = trimmedBarcode;
   doc["ip_ethernet"] = Ethernet.localIP().toString();
-  doc["ip_wifi"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "Not connected";
+  // doc["ip_wifi"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "Not connected";
 
   String output;
   serializeJson(doc, output);
@@ -197,25 +149,30 @@ void sendConfigPage(EthernetClient& client) {
   client.println("<input type='submit'> </form>");
 }
 
-void sendWiFiConfigPage(EthernetClient& client) {
-  client.println("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n");
-  client.println("<form method='POST' action='/setwifi'>");
-  client.println("SSID: <input name='ssid'><br>Password: <input name='pass' type='password'><br>");
-  client.println("<input type='submit' value='Simpan WiFi'></form>");
-}
-
 // ================== Setup & Loop ===================
 void setup() {
   Serial.begin(115200);
   GM66.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
 
-  loadStaticNetwork();
   Ethernet.init(5);
+
+  if (!loadStaticNetwork()) {
+    // Jika tidak ada IP tersimpan, pakai IP default
+    staticIP = IPAddress(10, 26, 101, 196);
+    gateway = IPAddress(10, 26, 101, 190);
+    subnet = IPAddress(255, 255, 255, 0);
+  }
+
   Ethernet.begin(mac, staticIP, dns, gateway, subnet);
   Serial.print("Ethernet IP: ");
   Serial.println(Ethernet.localIP());
 
-  loadWiFi();
+  if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+    Serial.println("Ethernet shield was not found.");
+  } else if (Ethernet.linkStatus() == LinkOFF) {
+    Serial.println("Ethernet cable is not connected.");
+  }
+
   server.begin();
 }
 
@@ -226,12 +183,14 @@ void loop() {
   if (client) {
     String req = "";
     while (client.connected()) {
+      Serial.println("Berhasil Terhubung..");
       if (client.available()) {
         char c = client.read();
         req += c;
         if (req.endsWith("\r\n\r\n")) break;
       }
     }
+    Serial.println("REQ: " + req);
     handleClient(client, req);
     client.stop();
   }
