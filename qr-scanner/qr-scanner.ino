@@ -1,17 +1,25 @@
 #include <SPI.h>
 #include <Ethernet.h>
-// #include <WiFi.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <HardwareSerial.h>
+#include <SmoothThermistor.h>
 
 #define RX_PIN 44
 #define TX_PIN 43
 
 HardwareSerial GM66(1);
 String trimmedBarcode = "";
-
 Preferences preferences;
+
+SmoothThermistor smoothThermistor(4,              // the analog pin to read from
+                                  ADC_SIZE_12_BIT, // the ADC size
+                                  10000,           // the nominal resistance
+                                  10000,           // the series resistance
+                                  3950,            // the beta coefficient of the thermistor
+                                  25,              // the temperature for nominal resistance
+                                  10);             // the number of samples to take for each measurement
+#define FAN_PIN 3
 
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
@@ -21,6 +29,7 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(8, 8, 8, 8);
 
 EthernetServer server(80);
+float temp = 0.0;
 
 // ================== Load Configuration ===================
 bool loadStaticNetwork() {
@@ -110,6 +119,7 @@ void handleClient(EthernetClient& client, const String& req) {
       if (newIP.fromString(ipStr) && newGW.fromString(gwStr) && newSN.fromString(snStr)) {
         saveStaticNetwork(newIP, newGW, newSN);
         client.println("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nNetwork saved. Please Restart ESP!!.");
+        ESP.restart();
         return;
       }
     }
@@ -124,7 +134,7 @@ void sendJsonResponse(EthernetClient& client) {
   JsonDocument doc;
   doc["kode_barang"] = trimmedBarcode;
   doc["ip_ethernet"] = Ethernet.localIP().toString();
-  // doc["ip_wifi"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "Not connected";
+  doc["temperature"] = smoothThermistor.temperature();
 
   String output;
   serializeJson(doc, output);
@@ -153,12 +163,14 @@ void sendConfigPage(EthernetClient& client) {
 void setup() {
   Serial.begin(115200);
   GM66.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
-
+  analogWrite(FAN_PIN, 0);
+  delay(500);
   Ethernet.init(5);
+  smoothThermistor.useAREF(true);
 
   if (!loadStaticNetwork()) {
     // Jika tidak ada IP tersimpan, pakai IP default
-    staticIP = IPAddress(10, 26, 101, 196);
+    staticIP = IPAddress(10, 26, 101, 197);
     gateway = IPAddress(10, 26, 101, 190);
     subnet = IPAddress(255, 255, 255, 0);
   }
@@ -177,6 +189,19 @@ void setup() {
 }
 
 void loop() {
+  temp = smoothThermistor.temperature();
+  Serial.print("Suhu: ");
+  Serial.println(temp);
+  delay(100);
+  if (temp >= 50 ){
+    analogWrite(FAN_PIN, 255);
+    Serial.println("FAN ON");
+    delay(1000);
+  }else if(temp <= 30){
+    analogWrite(FAN_PIN, 0);
+    Serial.println("FAN OFF");
+    delay(1000);
+  }
   readGM66();
 
   EthernetClient client = server.available();
