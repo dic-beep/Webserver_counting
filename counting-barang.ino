@@ -3,6 +3,7 @@
   #include <ArduinoJson.h>
   #include <esp_wifi.h>
   #include <Preferences.h>
+  #include <SmoothThermistor.h>
 
   // Konfigurasi MAC dan IP static
   byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
@@ -13,12 +14,24 @@
   IPAddress dns(8, 8, 8, 8);
 
   // Pin photosensor
-  const int sensorPin = 17;
-  #define LED_PIN 13
+  #define sensorPin 1
+  #define LED_PIN 2
   int lastSensorState = HIGH;
 
   // Counter barang
   int itemCount = 0;
+
+  #define FAN_PIN 3
+  #define TEMP_PIN 4
+  float temp = 0.0;
+
+  SmoothThermistor smoothThermistor(TEMP_PIN,              // the analog pin to read from
+                                  ADC_SIZE_12_BIT, // the ADC size
+                                  10000,           // the nominal resistance
+                                  10000,           // the series resistance
+                                  3950,            // the beta coefficient of the thermistor
+                                  25,              // the temperature for nominal resistance
+                                  10);             // the number of samples to take for each measurement
 
   // Server
   EthernetServer server(80);
@@ -71,6 +84,7 @@ void setup() {
   pinMode(sensorPin, INPUT_PULLUP);
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
+  smoothThermistor.useAREF(true);
 
   Ethernet.init(5);
 
@@ -95,7 +109,20 @@ void setup() {
 }
 
   void loop() {
-    checkSensor();
+  checkSensor();
+  temp = smoothThermistor.temperature();
+  // Serial.print("Suhu: ");
+  // Serial.println(temp);
+  // delay(100);
+  if (temp >= 50 ){
+    analogWrite(FAN_PIN, 255);
+    // Serial.println("FAN ON");
+    delay(1000);
+  }else if(temp <= 30){
+    analogWrite(FAN_PIN, 0);
+    // Serial.println("FAN OFF");
+    delay(1000);
+  }
 
     EthernetClient client = server.available();
     if (client) {
@@ -116,6 +143,7 @@ void setup() {
 
   void checkSensor() {
     int sensorState = digitalRead(sensorPin);
+    Serial.println(sensorState);
     if (lastSensorState == HIGH && sensorState == LOW) {
       itemCount++;
       Serial.print("Item Detected! Count: ");
@@ -125,13 +153,14 @@ void setup() {
     } else if(lastSensorState == LOW && sensorState == HIGH){
       digitalWrite(LED_PIN, LOW);
     }
-    lastSensorState = sensorState;
+    lastSensorState =  sensorState;
   }
 
   void sendJsonResponse(EthernetClient& client) {
     JsonDocument doc;
     doc["count"] = itemCount;
-    doc["ip"] = Ethernet.localIP().toString();
+    doc["ip"] = Ethernet.localIP();
+    doc["temp"] = smoothThermistor.temperature();
 
     String jsonOutput;
     serializeJson(doc, jsonOutput);

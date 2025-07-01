@@ -85,7 +85,7 @@ void readGM66() {
     }
     barcode.trim();
     if (barcode.length() > 0) {
-      trimmedBarcode = barcode.substring(0, barcode.length() - 3);
+      trimmedBarcode = barcode.substring(0, barcode.length());
       Serial.print("Barcode: ");
       Serial.println(trimmedBarcode);
     }
